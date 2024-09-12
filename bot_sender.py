@@ -97,6 +97,8 @@ def get_transactions(access_token):
             response = requests.get(url, cert=(CERT_FILE, KEY_FILE), headers=headers, verify=False, timeout=10)
             if response.status_code == 200:
                 transactions = response.json().get('transactions', [])
+                # Сортировка транзакций по полю `operationDate` от самой старой к самой новой
+                transactions = sorted(transactions, key=lambda x: x.get('operationDate', ''))
                 return [t for t in transactions if t.get('direction') == 'CREDIT']
             else:
                 print(f"Ошибка получения транзакций: {response.status_code}")
@@ -286,6 +288,8 @@ def get_transactions_by_date(access_token, date_str):
         response = requests.get(url, cert=(CERT_FILE, KEY_FILE), headers=headers, verify=False, timeout=10)
         if response.status_code == 200:
             transactions = response.json().get('transactions', [])
+            # Сортировка транзакций по полю `operationDate` от самой старой к самой новой
+            transactions = sorted(transactions, key=lambda x: x.get('operationDate', ''))
             return [t for t in transactions if t.get('direction') == 'CREDIT']
         else:
             print(f"Ошибка получения транзакций: {response.status_code}")
