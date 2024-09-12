@@ -238,6 +238,63 @@ def authenticate(message):
         bot.reply_to(message, f"Ошибка: {str(e)}")
 
 
+@bot.message_handler(commands=['get_transactions'])
+def get_transactions_for_date(message):
+    if not check_user(message):
+        bot.reply_to(message, "У вас нет доступа к этой команде.")
+        return
+
+    try:
+        date_str = message.text.split(" ")[1]  # ожидаем формат DD-MM-YYYY
+        # Проверяем, соответствует ли дата формату
+        date_obj = datetime.strptime(date_str, "%d-%m-%Y")  # это выбросит ValueError, если дата неверна
+        formatted_date = date_obj.strftime("%Y-%m-%d")  # преобразуем в формат YYYY-MM-DD
+
+        access_token = token_manager.get_access_token()
+        transactions = get_transactions_by_date(access_token, formatted_date)
+
+        if transactions:
+            transactions_list = process_transactions(transactions)
+            if transactions_list:
+                formatted_transactions = "\n\n".join(transactions_list)
+                chunks = split_text(formatted_transactions, 3000)
+                for chunk in chunks:
+                    reply = f"```\n{chunk}\n```"
+                    bot.send_message(message.chat.id, f"{reply}", parse_mode="Markdown")
+            else:
+                bot.reply_to(message, "Нет новых транзакций за эту дату.")
+        else:
+            bot.reply_to(message, "Нет транзакций за эту дату.")
+
+    except IndexError:
+        bot.reply_to(message, "Пожалуйста, укажите дату в формате DD-MM-YYYY.")
+    except ValueError:
+        bot.reply_to(message, "Неверный формат даты. Пожалуйста, используйте формат DD-MM-YYYY.")
+    except Exception as e:
+        bot.reply_to(message, f"Ошибка: {str(e)}")
+
+def get_transactions_by_date(access_token, date_str):
+    account_number = ACCOUNT_NUMBER
+    url_get_transactions = URL_GET_TRANSACTIONS
+    url = f"{url_get_transactions}?accountNumber={account_number}&statementDate={date_str}&page=1&curFormat=curTransfer"
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Accept': 'application/json'
+    }
+
+    try:
+        response = requests.get(url, cert=(CERT_FILE, KEY_FILE), headers=headers, verify=False, timeout=10)
+        if response.status_code == 200:
+            transactions = response.json().get('transactions', [])
+            return [t for t in transactions if t.get('direction') == 'CREDIT']
+        else:
+            print(f"Ошибка получения транзакций: {response.status_code}")
+            return []
+    except requests.exceptions.RequestException as e:
+        print(f"Ошибка запроса транзакций: {str(e)}")
+        return []
+
+
 @app.route('/redirect/')
 def redirect_handler():
     code = request.args.get('code')
