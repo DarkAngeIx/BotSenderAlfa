@@ -82,8 +82,8 @@ class TokenManager:
         return self.access_token
 
 
-def get_transactions(access_token):
-    today_date = datetime.now().strftime("%Y-%m-%d")
+def get_transactions(access_token, date_str=None, ignore_processed=True):
+    today_date = date_str if date_str else datetime.now().strftime("%Y-%m-%d")
     account_number = ACCOUNT_NUMBER
     url_get_transactions = URL_GET_TRANSACTIONS
     url = f"{url_get_transactions}?accountNumber={account_number}&statementDate={today_date}&page=1&curFormat=curTransfer"
@@ -97,9 +97,11 @@ def get_transactions(access_token):
             response = requests.get(url, cert=(CERT_FILE, KEY_FILE), headers=headers, verify=False, timeout=10)
             if response.status_code == 200:
                 transactions = response.json().get('transactions', [])
-                # Сортировка транзакций по полю `operationDate` от самой старой к самой новой
                 transactions = sorted(transactions, key=lambda x: x.get('operationDate', ''))
-                return [t for t in transactions if t.get('direction') == 'CREDIT']
+                if ignore_processed:
+                    return [t for t in transactions if t.get('direction') == 'CREDIT' and t.get('transactionId') not in processed_transaction_ids]
+                else:
+                    return [t for t in transactions if t.get('direction') == 'CREDIT']
             else:
                 print(f"Ошибка получения транзакций: {response.status_code}")
         except (requests.exceptions.RequestException, TimeoutError) as e:
@@ -187,7 +189,8 @@ def periodic_statement_request():
         time.sleep(180)
         try:
             access_token = token_manager.get_access_token()
-            send_transactions(chat_id, access_token)
+            transactions = get_transactions(access_token)  # with default ignore_processed=True
+            send_transactions(chat_id, transactions)
         except Exception as e:
             print(f"Ошибка при запросе выписки: {str(e)}")
 
@@ -247,13 +250,12 @@ def get_transactions_for_date(message):
         return
 
     try:
-        date_str = message.text.split(" ")[1]  # ожидаем формат DD-MM-YYYY
-        # Проверяем, соответствует ли дата формату
-        date_obj = datetime.strptime(date_str, "%d-%m-%Y")  # это выбросит ValueError, если дата неверна
-        formatted_date = date_obj.strftime("%Y-%m-%d")  # преобразуем в формат YYYY-MM-DD
+        date_str = message.text.split(" ")[1]
+        date_obj = datetime.strptime(date_str, "%d-%m-%Y")
+        formatted_date = date_obj.strftime("%Y-%m-%d")
 
         access_token = token_manager.get_access_token()
-        transactions = get_transactions_by_date(access_token, formatted_date)
+        transactions = get_transactions(access_token, formatted_date, ignore_processed=False)
 
         if transactions:
             transactions_list = process_transactions(transactions)
@@ -264,7 +266,7 @@ def get_transactions_for_date(message):
                     reply = f"```\n{chunk}\n```"
                     bot.send_message(message.chat.id, f"{reply}", parse_mode="Markdown")
             else:
-                bot.reply_to(message, "Нет новых транзакций за эту дату.")
+                bot.reply_to(message, "Нет транзакций за эту дату.")
         else:
             bot.reply_to(message, "Нет транзакций за эту дату.")
 
@@ -274,6 +276,7 @@ def get_transactions_for_date(message):
         bot.reply_to(message, "Неверный формат даты. Пожалуйста, используйте формат DD-MM-YYYY.")
     except Exception as e:
         bot.reply_to(message, f"Ошибка: {str(e)}")
+
 
 def get_transactions_by_date(access_token, date_str):
     account_number = ACCOUNT_NUMBER
@@ -288,7 +291,6 @@ def get_transactions_by_date(access_token, date_str):
         response = requests.get(url, cert=(CERT_FILE, KEY_FILE), headers=headers, verify=False, timeout=10)
         if response.status_code == 200:
             transactions = response.json().get('transactions', [])
-            # Сортировка транзакций по полю `operationDate` от самой старой к самой новой
             transactions = sorted(transactions, key=lambda x: x.get('operationDate', ''))
             return [t for t in transactions if t.get('direction') == 'CREDIT']
         else:
